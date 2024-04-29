@@ -1,0 +1,91 @@
+name: Release Plugins
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploymentApproval:
+        description: "Are the team pipelines' time windows and alarm blockers open?"
+        type: boolean
+        required: true
+      manualTestsCompleted:
+        description: "Have you manually tested the latest plugin code in a local Backstage app by following the tutorial?"
+        type: boolean
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Confirm deployment is approved
+        if: ${{ !inputs.deploymentApproval }}
+        run: |
+          echo Please confirm that time windows and alarm blockers are open before releasing!
+          exit 1
+      - name: Confirm manual tests are completed
+        if: ${{ !inputs.manualTestsCompleted }}
+        run: |
+          echo Please complete manual tests before releasing!
+          exit 1
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v1
+        with:
+          node-version: 16.x
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Check for new commits to release
+        run: |
+          CURRENT_VERSION=$(cat package.json | jq -r '.version')
+          COMMITS_TO_RELEASE=$(git log --pretty=oneline v$CURRENT_VERSION..HEAD | wc -l)
+          echo Current version: v$CURRENT_VERSION
+          echo Commits to release: $COMMITS_TO_RELEASE
+          echo "CURRENT_VERSION=${CURRENT_VERSION}" >> $GITHUB_ENV
+          echo "COMMITS_TO_RELEASE=${COMMITS_TO_RELEASE}" >> $GITHUB_ENV
+      - name: Check if no release needed
+        if: ${{ env.COMMITS_TO_RELEASE == 0 }}
+        run: |
+          echo No changes to release!
+          echo Current release: $CURRENT_VERSION
+      - name: Test latest changes
+        if: ${{ env.COMMITS_TO_RELEASE != 0 }}
+        run: |
+          yarn install
+          yarn ci
+        env:
+          CI: true
+
+      - name: 'Login to NPM registry'
+        if: ${{ env.COMMITS_TO_RELEASE != 0 }}
+        shell: bash
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${{secrets.NPM_AUTH_TOKEN}}" >> .npmrc
+          echo "always-auth = true" >> .npmrc
+          echo "update-notifier = false" >> .npmrc
+
+      - name: Publish new version to GitHub
+        if: ${{ env.COMMITS_TO_RELEASE != 0 }}
+        run: |
+          ls -la
+          npm version minor --force -m "release: [v%s]"
+          NEW_VERSION=$(cat package.json | jq -r '.version')
+          git push
+          git push origin "v${NEW_VERSION}"
+          GIT_COMMIT_ID=$(git rev-parse HEAD)
+          echo New version: v$NEW_VERSION
+          echo Commit ID: $GIT_COMMIT_ID
+          echo Previous version: v$CURRENT_VERSION
+          echo Changes released:
+          git log --pretty=oneline v$CURRENT_VERSION..v$NEW_VERSION
+          echo "NEW_VERSION=${NEW_VERSION}" >> $GITHUB_ENV
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Publish new version to NPM registry
+        if: ${{ env.COMMITS_TO_RELEASE != 0 }}
+        run: |
+          yarn publish-version
