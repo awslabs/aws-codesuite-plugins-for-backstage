@@ -34,7 +34,7 @@
   },
   "devDependencies": {
     "@backstage/cli": "^0.22.0",
-    "@spotify/prettier-config": "^14.0.0",
+    "@spotify/prettier-config": "^15.0.0",
     "@types/react": "^17.0.0",
     "lerna": "^6.0.1",
     "prettier": "^2.2.1",
